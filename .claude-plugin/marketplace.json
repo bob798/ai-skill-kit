@@ -1,0 +1,41 @@
+{
+  "name": "ai-skills",
+  "owner": {
+    "name": "bob798",
+    "email": ""
+  },
+  "metadata": {
+    "description": "Personal AI skill collection covering weekly review, RAG, LLM debugging, product analysis, writing, and more.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "ai-skills",
+      "description": "Personal AI skill collection: weekly review, RAG evaluator, LLM debugger, product analysis, article writing, SVG generation, and more.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./weekly-output",
+        "./retro",
+        "./rag-evaluator",
+        "./llm-debugger",
+        "./deep-analysis",
+        "./product-analysis",
+        "./agent-designer",
+        "./ai-solution-designer",
+        "./article-writer",
+        "./article-illustrator",
+        "./svg-generator",
+        "./svg-to-png",
+        "./prompt-optimizer",
+        "./decision-tree",
+        "./vector-db-guide",
+        "./langchain-patterns",
+        "./learn-anything",
+        "./mock-interview",
+        "./job-seeker-resume-cn",
+        "./ai-job-transition-resume"
+      ]
+    }
+  ]
+}
