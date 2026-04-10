@@ -1,0 +1,7 @@
+# 每日日报任务配置
+output_dir: ~/workspace/daily-reports
+output_file: ~/workspace/daily-reports/$DATE.md
+allowed_tools: Bash(git:*) Read Glob
+add_dirs: ~/workspace,~/lifelog
+skip_if_exists: true
+claude_bin: /Users/bob/devtools/node24/bin/claude
