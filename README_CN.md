@@ -89,6 +89,8 @@ ai-skill-kit/
 | [svg-generator](creative/svg-generator) | 以沟通目标为导向的 SVG 图形生成 |
 | [svg-to-png](creative/svg-to-png) | SVG 转 PNG，支持多种工具回退方案 |
 | [knowledge-viz](creative/knowledge-viz) | 知识动态化引擎 — 将抽象概念转化为交互式深色主题 HTML 体验页面 |
+| [iceberg-knowledge-map](creative/iceberg-knowledge-map) | 冰山知识地图 — 水面以上线性主线、下方分层下潜、底部关联网络的三维知识可视化 |
+| [frontend-design](creative/frontend-design) | 独特、生产级前端界面设计，规避千篇一律的 AI 美学 |
 
 ### 开发
 

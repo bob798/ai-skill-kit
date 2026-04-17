@@ -89,6 +89,8 @@ ai-skill-kit/
 | [svg-generator](creative/svg-generator) | User-goal-first SVG generation workflow |
 | [svg-to-png](creative/svg-to-png) | Reliable SVG to PNG conversion with tool fallbacks |
 | [knowledge-viz](creative/knowledge-viz) | Knowledge Dynamization Engine — turn abstract concepts into interactive dark-themed HTML experiences |
+| [iceberg-knowledge-map](creative/iceberg-knowledge-map) | Render any knowledge domain as an interactive iceberg: linear main-line on the surface, layered deep-dives below, relation graph at the bottom |
+| [frontend-design](creative/frontend-design) | Distinctive, production-grade frontend interfaces that avoid generic AI aesthetics |
 
 ### Development
 
