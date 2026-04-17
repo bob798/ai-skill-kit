@@ -88,6 +88,7 @@ ai-skill-kit/
 | [article-writer](creative/article-writer) | Structured article generation from notes, outlines, or rough content |
 | [svg-generator](creative/svg-generator) | User-goal-first SVG generation workflow |
 | [svg-to-png](creative/svg-to-png) | Reliable SVG to PNG conversion with tool fallbacks |
+| [knowledge-viz](creative/knowledge-viz) | Knowledge Dynamization Engine — turn abstract concepts into interactive dark-themed HTML experiences |
 
 ### Development
 
