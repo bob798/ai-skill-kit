@@ -1,0 +1,6 @@
+.DS_Store
+.omc/
+.obsidian/workspace.json
+
+workflow/claude-scheduler/tasks/*/
+!workflow/claude-scheduler/tasks/daily-report/
