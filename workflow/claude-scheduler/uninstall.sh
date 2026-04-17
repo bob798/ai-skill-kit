@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
-# uninstall.sh — 卸载 launchd 定时任务
-# 用法: uninstall.sh <task-name>
+# uninstall.sh — DEPRECATED shim.
+# Use `scheduler rm <name>` instead.
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+printf 'WARNING: uninstall.sh is deprecated; use `scheduler rm` instead.\n' >&2
+
 TASK_NAME="${1:?用法: uninstall.sh <task-name>}"
-LABEL="com.claude.scheduler.$TASK_NAME"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-
-if [[ ! -f "$PLIST" ]]; then
-  echo "任务未安装: $TASK_NAME"
-  exit 1
-fi
-
-launchctl unload "$PLIST" 2>/dev/null || true
-rm -f "$PLIST"
-echo "已卸载: $TASK_NAME"
+exec "$SCRIPT_DIR/scheduler" rm "$TASK_NAME"

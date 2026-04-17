@@ -1,168 +1,201 @@
-# Claude Scheduler
+# claude-scheduler
 
-基于 macOS launchd + `claude -p` 的定时任务调度器。让 Claude Code 在后台自动执行重复性任务，无需保持 REPL 打开。
+Claude-programmable background task runner for recurring Claude prompts.
+Cross-platform: launchd on macOS, systemd `--user` or crontab on Linux.
+No runtime dependencies beyond bash + the system scheduler.
 
-## 为什么需要这个？
+## The intended usage
 
-Claude Code 内置的 `CronCreate` 依赖 REPL 保持运行，关闭终端即失效。Claude Scheduler 将调度权下沉到操作系统层：
+Tell Claude:
 
-| | CronCreate | Claude Scheduler |
-|---|---|---|
-| 依赖 REPL | 是 | 否 |
-| 电脑休眠后 | 停止 | 唤醒后补执行 |
-| 最长有效期 | 7 天 | 永久 |
-| 任务管理 | 内存中 | 文件 + launchd |
+> "帮我每天 9 点生成一份日报，prompt 放在 `~/prompts/daily.md`。"
 
-## 工作原理
+or
 
-```
-macOS launchd (系统守护进程)
-    │ 按 cron 时间触发
-    ▼
-scheduler.sh <task-name>
-    │ 读取 tasks/<task-name>/task.yaml + prompt.md
-    ▼
-claude -p "<prompt>" --allowedTools "..." --add-dir "..."
-    │ headless 模式执行，无需交互
-    ▼
-输出到指定的 Markdown 文件
-```
+> "Schedule a weekly code review — every Friday 5 PM, prompt at `~/prompts/review.md`."
 
-## 快速开始
-
-### 1. 安装内置的 daily-report 任务
+Claude will call:
 
 ```bash
-# 每天 9:03 自动生成日报
-./install.sh daily-report "09:03"
-
-# 仅工作日
-./install.sh daily-report "09:03 weekdays"
+scheduler add daily-report \
+    --schedule "daily 09:00" \
+    --prompt-file ~/prompts/daily.md \
+    --output-dir  ~/workspace/daily-reports \
+    --allowed-tools "Bash(git:*) Read Glob" \
+    --add-dirs "~/workspace,~/lifelog"
 ```
 
-### 2. 手动触发测试
+on your behalf. `SKILL.md` in this directory tells Claude Code how to recognise
+the trigger and which flags to pass.
+
+## Why this exists
+
+Claude Code's built-in `CronCreate` runs inside the REPL — close the terminal
+and the job dies. `claude-scheduler` pushes the scheduling down to the OS:
+
+|                      | `CronCreate` (REPL) | `claude-scheduler` |
+| -------------------- | ------------------- | ------------------ |
+| Needs REPL open      | yes                 | no                 |
+| Survives reboot      | no                  | yes                |
+| Max validity         | 7 days              | permanent          |
+| Cross-platform       | yes                 | macOS + Linux      |
+
+## Installation
 
 ```bash
-# 直接运行
-./scheduler.sh daily-report
-
-# 通过 launchd 触发
-launchctl start com.claude.scheduler.daily-report
+git clone … ai-skill-kit
+cd ai-skill-kit/workflow/claude-scheduler
+# Optional: put the CLI on PATH
+ln -s "$PWD/scheduler" ~/.local/bin/scheduler
 ```
 
-### 3. 查看状态
+No build step. Everything is bash.
+
+Requirements:
+- `bash` 4+ (default on Linux; macOS ships 3.2 — install via `brew install bash` if you hit issues, or rely on `/usr/bin/env bash` to pick up a newer one).
+- Scheduling backend: launchd (macOS, built-in), or systemd-user, or crontab.
+- `claude` CLI on `$PATH` (override per-task with `--claude-bin`).
+
+## Manual usage (for humans)
+
+Most of the time you should let Claude drive. But you can also use the CLI
+directly:
 
 ```bash
-./status.sh
+# Register a task
+scheduler add daily-report \
+    --schedule "weekdays 09:00" \
+    --prompt-file ./tasks/daily-report/prompt.md
+
+# List
+scheduler list
+scheduler list --json
+
+# Status (last-run, next-run, log file)
+scheduler status
+scheduler status daily-report
+
+# Run now (same entry point the scheduler itself uses)
+scheduler run daily-report
+scheduler run daily-report 2026-04-15   # override $DATE
+
+# Remove
+scheduler rm daily-report
 ```
 
-### 4. 卸载
+Per-subcommand help: `scheduler <sub> --help`.
 
-```bash
-./uninstall.sh daily-report
+## Schedule expressions
+
+Three input forms, all equivalent under the hood:
+
+| Form               | Example                 | Meaning                       |
+| ------------------ | ----------------------- | ----------------------------- |
+| `daily HH:MM`      | `daily 09:00`           | every day at 09:00            |
+| `weekdays HH:MM`   | `weekdays 17:30`        | Monday–Friday at 17:30        |
+| cron `M H * * D`   | `0 9 * * 1-5`           | strict cron; `D` is `*` / `1-5` |
+
+The CLI rejects anything else with a clear error.
+
+## Task anatomy
+
+Each task lives in `tasks/<name>/` with two files:
+
+```
+tasks/<name>/
+├── task.yaml      flat key: value config (see below)
+└── prompt.md      prompt text fed to `claude -p`
 ```
 
-## 创建自定义任务
-
-### 目录结构
-
-```
-claude-scheduler/
-├── scheduler.sh          # 通用调度脚本
-├── install.sh            # 注册到 launchd
-├── uninstall.sh          # 从 launchd 移除
-├── status.sh             # 查看所有任务状态
-└── tasks/
-    └── <task-name>/
-        ├── task.yaml     # 任务配置
-        └── prompt.md     # Claude prompt
-```
-
-### task.yaml 配置项
+`task.yaml` keys (all optional except those marked **required**):
 
 ```yaml
-# 输出目录和文件（支持 $DATE、$HOME、~ 变量）
-output_dir: ~/workspace/daily-reports
-output_file: ~/workspace/daily-reports/$DATE.md
-
-# 授权 Claude 使用的工具
-allowed_tools: Bash(git:*) Read Glob
-
-# 授权 Claude 访问的目录（逗号分隔）
-add_dirs: ~/workspace,~/lifelog
-
-# 输出文件已存在时是否跳过（默认 true）
-skip_if_exists: true
-
-# claude 可执行文件路径（默认自动检测）
+schedule: "daily 09:00"         # required; stored for reference
+output_dir: ~/workspace/out     # supports $DATE, $HOME, ~
+output_file: ~/out/$DATE.md     # if unset, derived from output_dir
+allowed_tools: "Read Glob"      # space-separated list for --allowedTools
+add_dirs: "~/workspace,~/docs"  # comma-separated for --add-dir
+skip_if_exists: true            # skip if output_file already exists
 claude_bin: /usr/local/bin/claude
 ```
 
-### 示例：创建周报任务
+Hand-editing a `task.yaml` is supported. Re-register afterwards so the backend
+reflects the change:
 
 ```bash
-mkdir -p tasks/weekly-summary
+scheduler rm <name>
+scheduler add <name> --schedule "…" --prompt-file tasks/<name>/prompt.md
 ```
 
-`tasks/weekly-summary/task.yaml`:
-```yaml
-output_dir: ~/workspace/weekly-reports
-output_file: ~/workspace/weekly-reports/$DATE.md
-allowed_tools: Bash(git:*) Read Glob
-add_dirs: ~/workspace,~/lifelog
-skip_if_exists: true
-```
+## What happens on each trigger
 
-`tasks/weekly-summary/prompt.md`:
-```markdown
-汇总本周的 git 活动和 lifelog，生成周报...
-```
-
-安装：
-```bash
-# 每周五 17:00
-./install.sh weekly-summary "17:00 weekdays"
-```
-
-## 管理命令
+The system scheduler (launchd / systemd / cron) executes:
 
 ```bash
-# 查看所有任务
-./status.sh
-
-# 手动运行任意任务
-./scheduler.sh <task-name>
-./scheduler.sh <task-name> 2026-04-10  # 指定日期
-
-# 安装/卸载
-./install.sh <task-name> "HH:MM"
-./install.sh <task-name> "HH:MM weekdays"
-./uninstall.sh <task-name>
-
-# 查看日志
-cat ~/Library/Logs/claude-scheduler-<task-name>.log
-
-# launchd 直接操作
-launchctl start com.claude.scheduler.<task-name>
-launchctl list | grep claude.scheduler
+scheduler run <name>
 ```
 
-## 限制
+which:
 
-- **电脑必须开机**：关机期间任务不会执行（休眠可以，唤醒后补执行）
-- **API 消耗**：每次执行消耗 Claude API token
-- **仅 macOS**：依赖 launchd，Linux 需改用 systemd/cron
-- **无网络回调**：不支持 webhook 通知，结果仅写入本地文件
+1. Loads `tasks/<name>/task.yaml` via a resilient YAML reader (`yq` if present; awk fallback that handles inline `#` comments, quotes, blanks).
+2. Writes stderr from `claude -p` to the per-task log:
+   - macOS: `~/Library/Logs/claude-scheduler-<name>.log`
+   - Linux: `~/.local/state/claude-scheduler/<name>.log`
+3. Writes stdout to a temp file, then `mv`s it into place — a failed run never pollutes the previous output.
+4. If `skip_if_exists: true` and the output already exists, exits 0 without calling `claude`.
 
-## 迁移旧任务
+## Backends
 
-如果之前手动创建了 `com.claude.daily-report` 等 plist：
+| Platform | Backend            | Artifacts                                                              |
+| -------- | ------------------ | ---------------------------------------------------------------------- |
+| macOS    | launchd            | `~/Library/LaunchAgents/com.claude.scheduler.<name>.plist`             |
+| Linux    | systemd --user     | `~/.config/systemd/user/claude-scheduler-<name>.{service,timer}`       |
+| Linux    | crontab (fallback) | `crontab` line tagged with `# claude-scheduler:<name>`                 |
+
+Selection order: launchd → systemd --user → crontab. The first one whose
+`backend_available` probe succeeds is used.
+
+## Limits
+
+- The machine must be awake at the scheduled time (launchd + systemd-user with
+  `Persistent=true` will catch up after sleep; cron will not).
+- Every trigger spends Claude API tokens.
+- No network callback / webhook.
+- Claude-prompt tasks only. Plain shell cron jobs belong in `cron`/`at`.
+- Windows is not supported.
+
+## Files
+
+```
+claude-scheduler/
+├── SKILL.md             discovery entry for Claude Code
+├── scheduler            main CLI (this is what you and Claude call)
+├── scheduler.sh         legacy shim; now forwards to `scheduler run`
+├── install.sh           legacy shim; forwards to `scheduler add`
+├── uninstall.sh         legacy shim; forwards to `scheduler rm`
+├── status.sh            legacy shim; forwards to `scheduler status`
+├── lib/
+│   ├── common.sh        shared helpers (yaml_get, atomic_write, logging)
+│   ├── task.sh          task directory CRUD
+│   └── backends/
+│       ├── launchd.sh
+│       ├── systemd.sh
+│       └── cron.sh
+└── tasks/
+    └── daily-report/    bundled example; still works out of the box
+```
+
+## Migration from the old install.sh
 
 ```bash
-# 卸载旧的
-launchctl unload ~/Library/LaunchAgents/com.claude.daily-report.plist
-rm ~/Library/LaunchAgents/com.claude.daily-report.plist
+# Old (still works, but prints a deprecation warning)
+./install.sh daily-report "09:03 weekdays"
 
-# 用新工具重新安装
-./install.sh daily-report "09:03"
+# New
+./scheduler add daily-report \
+    --schedule "weekdays 09:03" \
+    --prompt-file tasks/daily-report/prompt.md
 ```
+
+Task directories created under the old layout are forward-compatible — the new
+CLI reads the same `task.yaml` + `prompt.md` shape.

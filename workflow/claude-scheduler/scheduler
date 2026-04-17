@@ -1,0 +1,540 @@
+#!/usr/bin/env bash
+# scheduler — unified CLI for claude-scheduler
+#
+# Subcommands:
+#   add     register a new scheduled Claude task
+#   list    list all tasks (human table or --json)
+#   rm      unregister and delete a task (idempotent)
+#   run     execute a task now (used by backend triggers)
+#   status  show per-task last-run / next-run / log-path
+#
+# Run `scheduler <subcommand> --help` for per-subcommand usage.
+
+set -euo pipefail
+
+# ── Root resolution ─────────────────────────────────────────────────────────
+# Resolve physical path even when invoked via a symlink.
+_resolve_self() {
+    local src="$1"
+    while [[ -h "$src" ]]; do
+        local dir
+        dir="$(cd -P "$(dirname "$src")" && pwd)"
+        src="$(readlink "$src")"
+        [[ "$src" != /* ]] && src="$dir/$src"
+    done
+    cd -P "$(dirname "$src")" && pwd
+}
+
+SCHEDULER_ROOT="$(_resolve_self "${BASH_SOURCE[0]}")"
+export SCHEDULER_ROOT
+
+# shellcheck source=lib/common.sh
+source "$SCHEDULER_ROOT/lib/common.sh"
+# shellcheck source=lib/task.sh
+source "$SCHEDULER_ROOT/lib/task.sh"
+
+# ── Backend selection ──────────────────────────────────────────────────────
+
+# Loads the best available backend into the current shell.
+# Order: launchd (macOS) → systemd --user (Linux) → cron (fallback).
+select_backend() {
+    local platform
+    platform="$(detect_platform)"
+
+    local -a candidates=()
+    if [[ "$platform" == "macos" ]]; then
+        candidates=(launchd cron)
+    elif [[ "$platform" == "linux" ]]; then
+        candidates=(systemd cron)
+    else
+        candidates=(cron)
+    fi
+
+    local chosen=""
+    local b
+    for b in "${candidates[@]}"; do
+        # Source into a subshell first to test availability without contaminating
+        # the current shell if the probe fails.
+        if ( source "$SCHEDULER_ROOT/lib/backends/$b.sh" && backend_available ) >/dev/null 2>&1; then
+            chosen="$b"
+            break
+        fi
+    done
+
+    if [[ -z "$chosen" ]]; then
+        log_error "no scheduler backend available (need launchd, systemd --user, or crontab)"
+        return 1
+    fi
+
+    # shellcheck source=/dev/null
+    source "$SCHEDULER_ROOT/lib/backends/$chosen.sh"
+    SCHEDULER_BACKEND="$chosen"
+    export SCHEDULER_BACKEND
+}
+
+# ── Top-level help ─────────────────────────────────────────────────────────
+
+top_help() {
+    cat <<'EOF'
+scheduler — Claude-programmable background task runner
+
+USAGE:
+  scheduler <subcommand> [args...]
+
+SUBCOMMANDS:
+  add       Register a new scheduled Claude task
+  list      List all tasks (add --json for machine-readable output)
+  rm        Unregister + delete a task (idempotent)
+  run       Execute a task now (invoked by the system scheduler)
+  status    Show last-run / next-run / log path for tasks
+
+EXAMPLES:
+  scheduler add weekly-review \
+      --schedule "weekdays 09:00" \
+      --prompt-file ~/prompts/weekly.md
+  scheduler list --json
+  scheduler rm weekly-review
+  scheduler run daily-report
+  scheduler status
+
+For per-subcommand help: scheduler <sub> --help
+EOF
+}
+
+# ── Argument helpers ───────────────────────────────────────────────────────
+
+_need_val() {
+    local flag="$1" val="${2:-}"
+    if [[ -z "$val" ]]; then
+        log_error "flag $flag requires a value"
+        exit 2
+    fi
+}
+
+# ── add ────────────────────────────────────────────────────────────────────
+
+cmd_add_help() {
+    cat <<'EOF'
+scheduler add <name> [options]
+
+Required:
+  --schedule "<expr>"       "daily HH:MM" | "weekdays HH:MM" | cron "M H * * D"
+  --prompt-file <path>      Markdown prompt sent to `claude -p`
+
+Optional:
+  --output-file <path>      absolute output path (supports $DATE, $HOME, ~)
+  --output-dir <path>       directory for dated output (supports same vars)
+  --allowed-tools "<list>"  space-separated tool list for --allowedTools
+  --add-dirs "<list>"       comma-separated paths for --add-dir
+  --skip-if-exists true|false  default: true
+  --claude-bin <path>       override the claude executable path
+
+The task is activated immediately on the first available backend
+(launchd on macOS; systemd --user or crontab on Linux).
+EOF
+}
+
+cmd_add() {
+    local name="" schedule="" prompt_file=""
+    local output_file="" output_dir=""
+    local allowed_tools="" add_dirs="" skip_if_exists="" claude_bin=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h) cmd_add_help; return 0 ;;
+            --schedule)       _need_val "$1" "${2:-}"; schedule="$2"; shift 2 ;;
+            --prompt-file)    _need_val "$1" "${2:-}"; prompt_file="$2"; shift 2 ;;
+            --output-file)    _need_val "$1" "${2:-}"; output_file="$2"; shift 2 ;;
+            --output-dir)     _need_val "$1" "${2:-}"; output_dir="$2"; shift 2 ;;
+            --allowed-tools)  _need_val "$1" "${2:-}"; allowed_tools="$2"; shift 2 ;;
+            --add-dirs)       _need_val "$1" "${2:-}"; add_dirs="$2"; shift 2 ;;
+            --skip-if-exists) _need_val "$1" "${2:-}"; skip_if_exists="$2"; shift 2 ;;
+            --claude-bin)     _need_val "$1" "${2:-}"; claude_bin="$2"; shift 2 ;;
+            --) shift; break ;;
+            -*) log_error "unknown flag: $1"; cmd_add_help >&2; return 2 ;;
+            *)
+                if [[ -z "$name" ]]; then
+                    name="$1"
+                    shift
+                else
+                    log_error "unexpected positional arg: $1"
+                    return 2
+                fi
+                ;;
+        esac
+    done
+
+    if [[ -z "$name" ]]; then
+        log_error "task name is required"
+        cmd_add_help >&2
+        return 2
+    fi
+    validate_task_name "$name" || return 2
+    if [[ -z "$schedule" ]]; then
+        log_error "--schedule is required"
+        return 2
+    fi
+    if [[ -z "$prompt_file" ]]; then
+        log_error "--prompt-file is required"
+        return 2
+    fi
+
+    if ! parse_schedule "$schedule" >/dev/null; then
+        return 2
+    fi
+
+    # Expand ~ in prompt-file path early so copy works from any CWD.
+    prompt_file="$(expand_vars "$prompt_file")"
+    if [[ ! -f "$prompt_file" ]]; then
+        log_error "prompt file not found: $prompt_file"
+        return 2
+    fi
+
+    TASK_PROMPT_FILE="$prompt_file" \
+    TASK_SCHEDULE="$schedule" \
+    TASK_OUTPUT_FILE="$output_file" \
+    TASK_OUTPUT_DIR="$output_dir" \
+    TASK_ALLOWED_TOOLS="$allowed_tools" \
+    TASK_ADD_DIRS="$add_dirs" \
+    TASK_SKIP_IF_EXISTS="${skip_if_exists:-true}" \
+    TASK_CLAUDE_BIN="$claude_bin" \
+    task_scaffold "$name"
+
+    select_backend
+    if ! backend_register "$name" "$schedule"; then
+        log_error "backend_register failed; rolling back task directory"
+        task_remove "$name"
+        return 1
+    fi
+
+    printf 'added: %s (backend=%s, schedule=%s)\n' "$name" "$SCHEDULER_BACKEND" "$schedule"
+    printf '  task dir: %s\n' "$(task_dir "$name")"
+    printf '  log file: %s\n' "$(log_file_for "$name")"
+}
+
+# ── rm ─────────────────────────────────────────────────────────────────────
+
+cmd_rm_help() {
+    cat <<'EOF'
+scheduler rm <name>
+
+Unregister the task from the active backend and remove its task directory.
+Idempotent: returns 0 even if the task does not exist.
+EOF
+}
+
+cmd_rm() {
+    local name="${1:-}"
+    case "$name" in
+        --help|-h) cmd_rm_help; return 0 ;;
+        "") log_error "task name required"; cmd_rm_help >&2; return 2 ;;
+    esac
+    validate_task_name "$name" || return 2
+
+    # Best-effort unregister on every backend — a task registered under one
+    # backend should be removable even if the active backend probe picks a
+    # different one (e.g. after cron fallback on a system that later gained
+    # systemd).
+    local b
+    for b in launchd systemd cron; do
+        ( source "$SCHEDULER_ROOT/lib/backends/$b.sh" 2>/dev/null && backend_available && backend_unregister "$name" ) >/dev/null 2>&1 || true
+    done
+
+    task_remove "$name"
+    printf 'removed: %s\n' "$name"
+}
+
+# ── run ────────────────────────────────────────────────────────────────────
+
+cmd_run_help() {
+    cat <<'EOF'
+scheduler run <name> [date]
+
+Execute a task immediately. [date] (YYYY-MM-DD) overrides $DATE in output paths.
+This is the entry point the system scheduler calls on each trigger.
+EOF
+}
+
+cmd_run() {
+    local name="${1:-}"
+    case "$name" in
+        --help|-h) cmd_run_help; return 0 ;;
+        "") log_error "task name required"; cmd_run_help >&2; return 2 ;;
+    esac
+    validate_task_name "$name" || return 2
+    shift || true
+    local date_val="${1:-$(date +%Y-%m-%d)}"
+
+    if ! task_exists "$name"; then
+        log_error "task not found: $name"
+        log_info "available tasks:"
+        task_list >&2 || true
+        return 1
+    fi
+
+    local task_root yaml prompt_file
+    task_root="$(task_dir "$name")"
+    yaml="$task_root/task.yaml"
+    prompt_file="$task_root/prompt.md"
+    if [[ ! -f "$prompt_file" ]]; then
+        log_error "missing prompt file: $prompt_file"
+        return 1
+    fi
+
+    local output_dir output_file allowed_tools add_dirs skip_if_exists claude_bin
+    output_dir="$(yaml_get output_dir "$yaml")"
+    output_file="$(yaml_get output_file "$yaml")"
+    allowed_tools="$(yaml_get allowed_tools "$yaml")"
+    add_dirs="$(yaml_get add_dirs "$yaml")"
+    skip_if_exists="$(yaml_get skip_if_exists "$yaml")"
+    claude_bin="$(yaml_get claude_bin "$yaml")"
+
+    output_dir="$(expand_vars "$output_dir" "$date_val")"
+    output_file="$(expand_vars "$output_file" "$date_val")"
+
+    claude_bin="$(claude_bin_path "$claude_bin")"
+    [[ -n "$output_dir"   ]] || output_dir="$HOME/workspace/claude-scheduler-output/$name"
+    [[ -n "$output_file"  ]] || output_file="$output_dir/$date_val.md"
+    [[ -n "$allowed_tools"  ]] || allowed_tools="Read Glob"
+    [[ -n "$skip_if_exists" ]] || skip_if_exists="true"
+
+    mkdir -p "$(dirname "$output_file")"
+
+    local log_file
+    log_file="$(log_file_for "$name")"
+
+    if [[ "$skip_if_exists" == "true" && -f "$output_file" ]]; then
+        printf '[%s][%s] output exists, skipping: %s\n' "$date_val" "$name" "$output_file"
+        return 0
+    fi
+
+    printf '[%s][%s] starting...\n' "$date_val" "$name"
+
+    local -a cmd
+    cmd=("$claude_bin" -p "$(cat "$prompt_file")")
+
+    if [[ -n "$allowed_tools" ]]; then
+        cmd+=(--allowedTools "$allowed_tools")
+    fi
+
+    if [[ -n "$add_dirs" ]]; then
+        local IFS=','
+        # shellcheck disable=SC2206
+        local -a parts=($add_dirs)
+        unset IFS
+        local d
+        for d in "${parts[@]}"; do
+            # trim whitespace
+            d="${d#"${d%%[![:space:]]*}"}"
+            d="${d%"${d##*[![:space:]]}"}"
+            [[ -z "$d" ]] && continue
+            d="$(expand_vars "$d" "$date_val")"
+            cmd+=(--add-dir "$d")
+        done
+    fi
+
+    # Atomic write — stderr goes to the per-task log, stdout to a temp file,
+    # moved into place on success.
+    local rc=0
+    atomic_write "$output_file" "$log_file" "${cmd[@]}" || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        printf '[%s][%s] done: %s\n' "$date_val" "$name" "$output_file"
+        return 0
+    fi
+    log_error "task failed (rc=$rc); output file untouched: $output_file"
+    log_error "see log: $log_file"
+    return "$rc"
+}
+
+# ── list ───────────────────────────────────────────────────────────────────
+
+cmd_list_help() {
+    cat <<'EOF'
+scheduler list [--json]
+
+Default: human-readable table.
+--json:  machine-readable JSON array with name, schedule, backend, registered.
+EOF
+}
+
+_list_json_item() {
+    local name="$1"
+    local schedule registered
+    schedule="$(task_field "$name" schedule)"
+    registered="false"
+    if backend_is_registered "$name" 2>/dev/null; then
+        registered="true"
+    fi
+    printf '{"name":%s,"schedule":%s,"backend":%s,"registered":%s,"task_dir":%s,"log_file":%s}' \
+        "$(json_escape "$name")" \
+        "$(json_escape "$schedule")" \
+        "$(json_escape "$SCHEDULER_BACKEND")" \
+        "$registered" \
+        "$(json_escape "$(task_dir "$name")")" \
+        "$(json_escape "$(log_file_for "$name")")"
+}
+
+cmd_list() {
+    local json=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h) cmd_list_help; return 0 ;;
+            --json) json=1; shift ;;
+            *) log_error "unknown arg: $1"; return 2 ;;
+        esac
+    done
+
+    select_backend
+
+    local -a names=()
+    local n
+    while IFS= read -r n; do
+        [[ -n "$n" ]] || continue
+        names+=("$n")
+    done < <(task_list)
+
+    if [[ "$json" -eq 1 ]]; then
+        # Prefer jq if available for a prettier output; otherwise printf.
+        local buf="["
+        local first=1
+        local item
+        for n in "${names[@]}"; do
+            item="$(_list_json_item "$n")"
+            if [[ $first -eq 1 ]]; then
+                buf+="$item"
+                first=0
+            else
+                buf+=",$item"
+            fi
+        done
+        buf+="]"
+        if command -v jq >/dev/null 2>&1; then
+            printf '%s' "$buf" | jq .
+        else
+            printf '%s\n' "$buf"
+        fi
+        return 0
+    fi
+
+    if [[ ${#names[@]} -eq 0 ]]; then
+        echo "(no tasks)"
+        return 0
+    fi
+
+    printf '%-24s %-8s %-28s %s\n' "NAME" "STATE" "SCHEDULE" "BACKEND"
+    printf '%-24s %-8s %-28s %s\n' "----" "-----" "--------" "-------"
+    for n in "${names[@]}"; do
+        local sched state
+        sched="$(task_field "$n" schedule)"
+        [[ -n "$sched" ]] || sched="(unset)"
+        if backend_is_registered "$n" 2>/dev/null; then
+            state="active"
+        else
+            state="inactive"
+        fi
+        printf '%-24s %-8s %-28s %s\n' "$n" "$state" "$sched" "$SCHEDULER_BACKEND"
+    done
+}
+
+# ── status ─────────────────────────────────────────────────────────────────
+
+cmd_status_help() {
+    cat <<'EOF'
+scheduler status [name]
+
+Without a name: print status for every task.
+With a name:    print verbose status for that task only.
+
+Fields: registered, schedule, backend, last-run, next-run, log-file, task-dir.
+EOF
+}
+
+cmd_status_one() {
+    local name="$1"
+    local schedule registered last next log_path dir
+    schedule="$(task_field "$name" schedule)"
+    [[ -n "$schedule" ]] || schedule="(unset)"
+
+    if backend_is_registered "$name" 2>/dev/null; then
+        registered="yes"
+    else
+        registered="no"
+    fi
+    last="$(backend_last_run "$name" 2>/dev/null || echo "never")"
+    next="$(backend_next_run "$name" 2>/dev/null || echo "unknown")"
+    log_path="$(log_file_for "$name")"
+    dir="$(task_dir "$name")"
+
+    printf 'task:        %s\n' "$name"
+    printf '  backend:   %s\n' "$SCHEDULER_BACKEND"
+    printf '  registered: %s\n' "$registered"
+    printf '  schedule:  %s\n' "$schedule"
+    printf '  last-run:  %s\n' "$last"
+    printf '  next-run:  %s\n' "$next"
+    printf '  log-file:  %s\n' "$log_path"
+    printf '  task-dir:  %s\n' "$dir"
+}
+
+cmd_status() {
+    local name=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h) cmd_status_help; return 0 ;;
+            -*) log_error "unknown flag: $1"; return 2 ;;
+            *) name="$1"; shift ;;
+        esac
+    done
+
+    if [[ -n "$name" ]]; then
+        validate_task_name "$name" || return 2
+    fi
+
+    select_backend
+
+    if [[ -n "$name" ]]; then
+        if ! task_exists "$name"; then
+            log_error "task not found: $name"
+            return 1
+        fi
+        cmd_status_one "$name"
+        return 0
+    fi
+
+    local -a names=()
+    local n
+    while IFS= read -r n; do
+        [[ -n "$n" ]] || continue
+        names+=("$n")
+    done < <(task_list)
+
+    if [[ ${#names[@]} -eq 0 ]]; then
+        echo "(no tasks)"
+        return 0
+    fi
+
+    for n in "${names[@]}"; do
+        cmd_status_one "$n"
+        echo ""
+    done
+}
+
+# ── Dispatch ───────────────────────────────────────────────────────────────
+
+main() {
+    local sub="${1:-}"
+    case "$sub" in
+        ""|--help|-h|help) top_help ;;
+        add)    shift; cmd_add    "$@" ;;
+        list)   shift; cmd_list   "$@" ;;
+        rm|remove|delete) shift; cmd_rm "$@" ;;
+        run)    shift; cmd_run    "$@" ;;
+        status) shift; cmd_status "$@" ;;
+        *)
+            log_error "unknown subcommand: $sub"
+            top_help >&2
+            return 2
+            ;;
+    esac
+}
+
+main "$@"
