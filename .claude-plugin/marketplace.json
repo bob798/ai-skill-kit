@@ -35,7 +35,15 @@
         "./learning/learn-anything",
         "./career/mock-interview",
         "./career/job-seeker-resume-cn",
-        "./career/ai-job-transition-resume"
+        "./career/ai-job-transition-resume",
+        "./career/ai-engineer-interviewer",
+        "./career/interview-sparring",
+        "./career/capability-miner",
+        "./learning/atdf-analyzer",
+        "./development/add-tests",
+        "./development/eval-debug",
+        "./development/rag-eval",
+        "./workflow/cc-stats"
       ]
     }
   ]
