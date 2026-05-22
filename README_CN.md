@@ -105,6 +105,7 @@ ai-skill-kit/
 | [claude-scheduler](workflow/claude-scheduler) | 使用 macOS launchd 调度 Claude Code 定时任务 |
 | [retro](workflow/retro) | 分析近期对话，识别可自动化的重复操作 |
 | [weekly-output](workflow/weekly-output) | 结合 BASB、Zettelkasten、T 型、GTD 框架合成周报 |
+| [weekly-report](workflow/weekly-report) | 项目周报单页 PNG + Markdown 文字版，给领导/同事汇报用 |
 
 ---
 

@@ -105,6 +105,7 @@ ai-skill-kit/
 | [claude-scheduler](workflow/claude-scheduler) | Schedule Claude Code tasks using macOS launchd for persistent background execution |
 | [retro](workflow/retro) | Analyze recent conversations to identify repeated operations for automation |
 | [weekly-output](workflow/weekly-output) | Synthesize weekly notes using BASB, Zettelkasten, T-shape, and GTD frameworks |
+| [weekly-report](workflow/weekly-report) | Single-page weekly status report PNG + Markdown for stakeholder reporting |
 
 ---
 

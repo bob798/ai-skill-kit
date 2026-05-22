@@ -15,6 +15,7 @@
       "source": "./",
       "strict": false,
       "skills": [
+        "./workflow/weekly-report",
         "./weekly-output",
         "./retro",
         "./rag-evaluator",
