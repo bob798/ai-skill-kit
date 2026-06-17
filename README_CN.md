@@ -97,6 +97,7 @@ ai-skill-kit/
 | 技能 | 说明 |
 |------|------|
 | [add-tests](development/add-tests) | 为已有代码添加单元测试，识别可测试函数并确保全部通过 |
+| [test-audit](development/test-audit) | 全维度测试审计：单元/API/组件/安全/集成/E2E 六维覆盖分析与自动补齐 |
 | [eval-debug](development/eval-debug) | 分析面试 JSONL 文件，调试模型质量和程序逻辑 |
 | [rag-eval](development/rag-eval) | 分析 RAG 实验结果，解读指标，识别异常 |
 

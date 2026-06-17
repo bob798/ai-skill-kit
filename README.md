@@ -97,6 +97,7 @@ ai-skill-kit/
 | Skill | Description |
 |------|------|
 | [add-tests](development/add-tests) | Add unit tests to existing code, identify testable functions, and ensure all tests pass |
+| [test-audit](development/test-audit) | Full-dimension test audit: Unit/API/Component/Security/Integration/E2E coverage analysis and auto-generation |
 | [eval-debug](development/eval-debug) | Analyze interview JSONL files for model quality and program logic debugging |
 | [rag-eval](development/rag-eval) | Analyze RAG experimental results, interpret metrics, and identify anomalies |
 
