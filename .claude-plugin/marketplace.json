@@ -43,6 +43,10 @@
         "./development/add-tests",
         "./development/eval-debug",
         "./development/rag-eval",
+        "./development/test-audit",
+        "./development/ok-testaudit-nuxt",
+        "./development/ok-testaudit-server",
+        "./development/ok-itest",
         "./workflow/cc-stats"
       ]
     }

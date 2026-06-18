@@ -97,7 +97,10 @@ ai-skill-kit/
 | Skill | Description |
 |------|------|
 | [add-tests](development/add-tests) | Add unit tests to existing code, identify testable functions, and ensure all tests pass |
-| [test-audit](development/test-audit) | Full-dimension test audit: Unit/API/Component/Security/Integration/E2E coverage analysis and auto-generation |
+| [test-audit](development/test-audit) | Full-dimension test audit (React/Next.js): Unit/API/Component/Security/Integration/E2E coverage analysis and auto-generation |
+| [ok-testaudit-nuxt](development/ok-testaudit-nuxt) | Test-coverage audit for Nuxt 3 + Vitest + Playwright frontends — gap analysis and missing-test generation aligned to real Nuxt conventions |
+| [ok-testaudit-server](development/ok-testaudit-server) | Test-coverage audit for Spring Boot + Spring AI backends — multi-tenant isolation & LLM tool-chain gaps, JUnit/Mockito/Testcontainers/WireMock |
+| [ok-itest](development/ok-itest) | Generate executable integration-test specs, skeletons, and PR reports for Spring Boot + Spring AI (WireMock + Testcontainers + tenant isolation) |
 | [eval-debug](development/eval-debug) | Analyze interview JSONL files for model quality and program logic debugging |
 | [rag-eval](development/rag-eval) | Analyze RAG experimental results, interpret metrics, and identify anomalies |
 

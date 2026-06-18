@@ -97,7 +97,10 @@ ai-skill-kit/
 | 技能 | 说明 |
 |------|------|
 | [add-tests](development/add-tests) | 为已有代码添加单元测试，识别可测试函数并确保全部通过 |
-| [test-audit](development/test-audit) | 全维度测试审计：单元/API/组件/安全/集成/E2E 六维覆盖分析与自动补齐 |
+| [test-audit](development/test-audit) | 全维度测试审计（React/Next.js）：单元/API/组件/安全/集成/E2E 六维覆盖分析与自动补齐 |
+| [ok-testaudit-nuxt](development/ok-testaudit-nuxt) | Nuxt 3 + Vitest + Playwright 前端测试审计：按真实 Nuxt 惯例做缺口分析与补齐 |
+| [ok-testaudit-server](development/ok-testaudit-server) | Spring Boot + Spring AI 后端测试审计：多租户隔离与 LLM 工具链缺口，JUnit/Mockito/Testcontainers/WireMock |
+| [ok-itest](development/ok-itest) | 为 Spring Boot + Spring AI 生成可执行集成测试 spec、骨架与 PR 报告（WireMock + Testcontainers + 租户隔离） |
 | [eval-debug](development/eval-debug) | 分析面试 JSONL 文件，调试模型质量和程序逻辑 |
 | [rag-eval](development/rag-eval) | 分析 RAG 实验结果，解读指标，识别异常 |
 
